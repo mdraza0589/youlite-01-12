@@ -333,7 +333,75 @@ const styles = StyleSheet.create({
         color: '#000',
     },
 
+    // Add these styles to your existing styles
+
+    stockBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#fff5f5',
+        paddingVertical: 6,
+        paddingHorizontal: 12,
+        borderRadius: 6,
+        marginTop: 8,
+        alignSelf: 'flex-start',
+        borderWidth: 1,
+        borderColor: '#ffcdd2',
+    },
+
+    stockText: {
+        color: '#dc3545',
+        fontSize: 14,
+        fontWeight: '500',
+        marginLeft: 6,
+    },
+
+    disabledButton: {
+        backgroundColor: '#cccccc',
+        opacity: 0.7,
+    },
+
+    disabledText: {
+        color: '#999',
+    },
+
+    skuText: {
+        fontSize: 12,
+        color: '#666',
+        marginLeft: 6,
+    },
+
+    depositOptionHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flex: 1,
+    },
+
+    depositOptionLabel: {
+        fontSize: 16,
+        fontWeight: '500',
+        color: '#333',
+        flex: 1,
+        marginLeft: 10,
+        marginRight: 10,
+    },
+
+    depositOptionAmount: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: Colors.PRIMARY,
+    },
+
+    depositRemaining: {
+        fontSize: 14,
+        color: '#666',
+        marginTop: 4,
+        marginLeft: 30,
+        fontStyle: 'italic',
+    },
+
 });
 
 
 export default styles;
+

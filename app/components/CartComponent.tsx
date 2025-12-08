@@ -426,11 +426,6 @@ const CartComponent = () => {
             </Text>
           </View>
 
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Delivery</Text>
-            <Text style={styles.summaryValue}>FREE</Text>
-          </View>
-
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>Total</Text>
             <Text style={styles.totalValue}>₹{total.toLocaleString()}</Text>
@@ -449,3 +444,6 @@ const CartComponent = () => {
 };
 
 export default CartComponent;
+
+
+

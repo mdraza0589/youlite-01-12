@@ -39,6 +39,8 @@ const stripHtml = (html?: string): string => {
     return html.replace(/(<([^>]+)>)/gi, '').replace(/&nbsp;/g, ' ').trim();
 };
 
+
+
 const decodeEntities = (s: string): string => {
     try {
         return s
@@ -112,26 +114,15 @@ const parsePriceRangeFromHtml = (priceHtml?: string): { min?: number; max?: numb
     }
 };
 
-// Enhanced function to get variation details with proper mapping
-interface VariationDetails {
-    variationMap: { [optionKey: string]: VariationData };
-    variationOptions: string[];
-    defaultOption: string;
-}
-
-interface VariationData {
-    id: string;
-    price: number;
-    originalPrice: number;
-    discount?: number;
-    inStock: boolean;
-    sku?: string;
-    attributes: { name: string; option: string }[];
-}
-
-const getVariationDetails = async (productId: string, variationIds: number[]): Promise<VariationDetails> => {
-    const variationMap: { [optionKey: string]: VariationData } = {};
-    const variationOptions: string[] = [];
+// Function to get variation details
+const getVariationDetails = async (productId: string, variationIds: number[]): Promise<{
+    variationPrices: { [key: string]: number };
+    variationOriginalPrices: { [key: string]: number };
+    variationDiscounts: { [key: string]: number };
+}> => {
+    const variationPrices: { [key: string]: number } = {};
+    const variationOriginalPrices: { [key: string]: number } = {};
+    const variationDiscounts: { [key: string]: number } = {};
 
     try {
         for (const variationId of variationIds) {
@@ -142,41 +133,15 @@ const getVariationDetails = async (productId: string, variationIds: number[]): P
                 const salePrice = toNum(variationData.sale_price || variationData.price, 0);
                 const regularPrice = toNum(variationData.regular_price || variationData.price, 0);
                 const discount = pctDiscount(regularPrice, salePrice);
-                const inStock = (variationData.stock_status ?? 'instock').toLowerCase() === 'instock';
-                const attributes = Array.isArray(variationData.attributes) ? variationData.attributes : [];
 
-                // Create a clean option string from all attributes
-                const optionParts: string[] = [];
-                attributes.forEach((attr: any) => {
-                    if (attr?.name && attr?.option) {
-                        optionParts.push(attr.option.trim());
+                const attributes = variationData.attributes || [];
+                if (attributes.length > 0 && attributes[0].option) {
+                    const optionKey = attributes[0].option;
+                    variationPrices[optionKey] = salePrice;
+                    variationOriginalPrices[optionKey] = regularPrice;
+                    if (discount) {
+                        variationDiscounts[optionKey] = discount;
                     }
-                });
-
-                let optionKey = '';
-                if (optionParts.length > 0) {
-                    optionKey = optionParts.join(' / ');
-                } else if (variationData.sku) {
-                    optionKey = variationData.sku;
-                } else {
-                    optionKey = `Variant ${variationId}`;
-                }
-
-                variationMap[optionKey] = {
-                    id: variationId.toString(),
-                    price: salePrice,
-                    originalPrice: regularPrice,
-                    discount,
-                    inStock,
-                    sku: variationData.sku,
-                    attributes: attributes.map((attr: any) => ({
-                        name: attr?.name || '',
-                        option: attr?.option || ''
-                    }))
-                };
-
-                if (!variationOptions.includes(optionKey)) {
-                    variationOptions.push(optionKey);
                 }
             }
         }
@@ -184,14 +149,7 @@ const getVariationDetails = async (productId: string, variationIds: number[]): P
         console.error('Error fetching variation details:', error);
     }
 
-    // Sort options alphabetically for consistent display
-    variationOptions.sort();
-
-    return {
-        variationMap,
-        variationOptions: variationOptions.length > 0 ? variationOptions : ['Default'],
-        defaultOption: variationOptions.length > 0 ? variationOptions[0] : 'Default'
-    };
+    return { variationPrices, variationOriginalPrices, variationDiscounts };
 };
 
 // Function to extract deposit settings from meta_data
@@ -244,6 +202,7 @@ const isVideoLink = (url: string) => {
     );
 };
 
+
 const extractVideoData = (metaData: any[]): { videoUrl: string; videoType: string } | null => {
     if (!Array.isArray(metaData)) return null;
 
@@ -265,6 +224,7 @@ const extractVideoData = (metaData: any[]): { videoUrl: string; videoType: strin
     }
 };
 
+
 interface Product {
     id: string;
     name: string;
@@ -280,14 +240,14 @@ interface Product {
     deliveryDate: string;
     inStock: boolean;
     isVariable?: boolean;
-    variationMap?: { [optionKey: string]: VariationData };
-    variationOptions?: string[];
+    variationPrices?: { [key: string]: number };
+    variationOriginalPrices?: { [key: string]: number };
+    variationDiscounts?: { [key: string]: number };
     depositEnabled?: boolean;
     depositType?: 'fixed' | 'percentage';
     depositAmount?: number;
     forceDeposit?: boolean;
     categoryName?: string;
-    defaultVariationOption?: string;
 }
 
 interface RelatedProduct {
@@ -319,9 +279,9 @@ const mapToUIProduct = async (p: any): Promise<Product> => {
 
     let sale = toNum(p?.sale_price ?? p?.price, 0);
     let regular = toNum(p?.regular_price ?? p?.price, 0);
-    let variationMap: { [optionKey: string]: VariationData } = {};
-    let variationOptions: string[] = [];
-    let defaultVariationOption = 'Default';
+    let variationPrices: { [key: string]: number } = {};
+    let variationOriginalPrices: { [key: string]: number } = {};
+    let variationDiscounts: { [key: string]: number } = {};
 
     // Handle variable products
     if (p?.type === 'variable') {
@@ -331,12 +291,12 @@ const mapToUIProduct = async (p: any): Promise<Product> => {
             regular = range.max;
         }
 
-        // Get variation details if variations exist
+        // Get variation prices if variations exist
         if (p.variations && Array.isArray(p.variations) && p.variations.length > 0) {
             const variationDetails = await getVariationDetails(String(p.id), p.variations);
-            variationMap = variationDetails.variationMap;
-            variationOptions = variationDetails.variationOptions;
-            defaultVariationOption = variationDetails.defaultOption;
+            variationPrices = variationDetails.variationPrices;
+            variationOriginalPrices = variationDetails.variationOriginalPrices;
+            variationDiscounts = variationDetails.variationDiscounts;
         }
     }
 
@@ -350,7 +310,7 @@ const mapToUIProduct = async (p: any): Promise<Product> => {
 
     // If video exists, add it to the END of images array instead of beginning
     if (videoData?.videoUrl) {
-        imageUrls.push(videoData.videoUrl);
+        imageUrls.push(videoData.videoUrl); // Changed from unshift() to push()
     }
 
     const desc = stripHtml(decodeEntities(p?.description || '')) || stripHtml(decodeEntities(p?.short_description || '')) || '';
@@ -368,16 +328,13 @@ const mapToUIProduct = async (p: any): Promise<Product> => {
     }
 
     const attributeName = attr?.name || 'Option';
-
-    // Use variation options if available, otherwise use attribute options
-    const options = variationOptions.length > 0
-        ? variationOptions
-        : (attr && Array.isArray(attr.options) && attr.options.length > 0
+    const options =
+        attr && Array.isArray(attr.options) && attr.options.length > 0
             ? attr.options
                 .map((opt: any) => (typeof opt === 'string' ? opt : ''))
                 .map((s: string) => s.trim())
                 .filter((s: string) => s.length > 0)
-            : ['Default']);
+            : ['Default'];
 
     // Extract deposit settings
     const depositSettings = extractDepositSettings(p?.meta_data || []);
@@ -401,9 +358,9 @@ const mapToUIProduct = async (p: any): Promise<Product> => {
         deliveryDate: safeDatePlusDays(5),
         inStock: (p?.stock_status ?? 'instock').toLowerCase() === 'instock',
         isVariable: p?.type === 'variable',
-        variationMap,
-        variationOptions,
-        defaultVariationOption,
+        variationPrices,
+        variationOriginalPrices,
+        variationDiscounts,
         categoryName,
         ...depositSettings
     };
@@ -461,8 +418,6 @@ const ItemDetails = () => {
     const params = useLocalSearchParams<{ id?: string }>();
     const productId = useMemo(() => (params?.id ? String(params.id) : ''), [params?.id]);
     const [selectedOption, setSelectedOption] = useState<string>('Default');
-    const [selectedVariationId, setSelectedVariationId] = useState<string | null>(null);
-    const [selectedVariationInStock, setSelectedVariationInStock] = useState<boolean>(true);
     const [selectedImageIndex, setSelectedImageIndex] = useState<number>(0);
     const [quantity, setQuantity] = useState<number>(1);
     const [product, setProduct] = useState<Product | null>(null);
@@ -484,8 +439,8 @@ const ItemDetails = () => {
     const getCurrentPrice = (): number => {
         if (!product) return 0;
 
-        if (product.isVariable && product.variationMap && product.variationMap[selectedOption]) {
-            return product.variationMap[selectedOption].price;
+        if (product.isVariable && product.variationPrices && product.variationPrices[selectedOption]) {
+            return product.variationPrices[selectedOption];
         }
 
         return product.price;
@@ -524,10 +479,9 @@ const ItemDetails = () => {
     const getCurrentOriginalPrice = (): number | undefined => {
         if (!product) return undefined;
 
-        if (product.isVariable && product.variationMap && product.variationMap[selectedOption]) {
-            const variation = product.variationMap[selectedOption];
-            const currentPrice = variation.price;
-            const originalPrice = variation.originalPrice;
+        if (product.isVariable && product.variationOriginalPrices && product.variationOriginalPrices[selectedOption]) {
+            const originalPrice = product.variationOriginalPrices[selectedOption];
+            const currentPrice = getCurrentPrice();
             return originalPrice > currentPrice ? originalPrice : undefined;
         }
 
@@ -538,9 +492,8 @@ const ItemDetails = () => {
     const getCurrentDiscount = (): number | undefined => {
         if (!product) return undefined;
 
-        if (product.isVariable && product.variationMap && product.variationMap[selectedOption]) {
-            const variation = product.variationMap[selectedOption];
-            return variation.discount;
+        if (product.isVariable && product.variationDiscounts && product.variationDiscounts[selectedOption]) {
+            return product.variationDiscounts[selectedOption];
         }
 
         const currentPrice = getCurrentPrice();
@@ -551,17 +504,6 @@ const ItemDetails = () => {
         }
 
         return product.discount;
-    };
-
-    // Get current variant stock status
-    const getCurrentInStock = (): boolean => {
-        if (!product) return false;
-
-        if (product.isVariable && product.variationMap && product.variationMap[selectedOption]) {
-            return product.variationMap[selectedOption].inStock;
-        }
-
-        return product.inStock;
     };
 
     // Calculate deposit options
@@ -610,16 +552,6 @@ const ItemDetails = () => {
 
     const handleOptionChange = (itemValue: string) => {
         setSelectedOption(itemValue);
-
-        // Update variation ID and stock status
-        if (product?.isVariable && product.variationMap && product.variationMap[itemValue]) {
-            const variation = product.variationMap[itemValue];
-            setSelectedVariationId(variation.id);
-            setSelectedVariationInStock(variation.inStock);
-        } else {
-            setSelectedVariationId(null);
-            setSelectedVariationInStock(product?.inStock || false);
-        }
     };
 
     const handleDepositOptionChange = (optionType: 'full' | 'deposit') => {
@@ -678,17 +610,7 @@ const ItemDetails = () => {
                 const uiProd = await mapToUIProduct(detailData);
                 if (mounted) {
                     setProduct(uiProd);
-                    if (uiProd.options.length > 0) {
-                        // Use default variation option if available
-                        const defaultOption = uiProd.defaultVariationOption || uiProd.options[0];
-                        setSelectedOption(defaultOption);
-
-                        // Set variation ID if it's a variable product
-                        if (uiProd.isVariable && uiProd.variationMap && uiProd.variationMap[defaultOption]) {
-                            setSelectedVariationId(uiProd.variationMap[defaultOption].id);
-                            setSelectedVariationInStock(uiProd.variationMap[defaultOption].inStock);
-                        }
-                    }
+                    if (uiProd.options.length > 0) setSelectedOption(uiProd.options[0]);
 
                     // Set default deposit option based on product settings
                     if (uiProd.depositEnabled && uiProd.forceDeposit) {
@@ -781,20 +703,13 @@ const ItemDetails = () => {
                 alert("Unable to start chat: missing user or product data");
                 return;
             }
-
-            const chatProductId = selectedVariationId || product.id;
-
             router.push({
                 pathname: "/pages/DetailsOfItem/ChatScreen",
                 params: {
-                    product_id: chatProductId.toString(),
+                    product_id: product.id.toString(),
                     user_id: customer.id.toString(),
                     user_name: customer.first_name || customer.username || "Guest",
                     product_name: product.name,
-                    ...(selectedVariationId && {
-                        variation_id: selectedVariationId,
-                        variation_option: selectedOption
-                    })
                 },
             });
         } catch (error) {
@@ -802,8 +717,6 @@ const ItemDetails = () => {
         }
     };
 
-
-    
     const toggleWishlist = async () => {
         if (!userId || !product) {
             router.push('/Login/LoginRegisterPage');
@@ -845,14 +758,7 @@ const ItemDetails = () => {
             setAddToCartLoading(true);
             const fetchedCustomer = await getCustomerById(userId);
             let cart = fetchedCustomer?.meta_data?.find((m: any) => m.key === 'cart')?.value || [];
-
-            // For variable products, use variation ID if selected
-            let productIdToAdd = addProductId;
-            if (product?.isVariable && selectedVariationId) {
-                productIdToAdd = selectedVariationId;
-            }
-
-            const existingIndex = cart.findIndex((item: any) => item.id === productIdToAdd);
+            const existingIndex = cart.findIndex((item: any) => item.id === addProductId);
 
             const depositOptions = getDepositOptions();
             const isDeposit = selectedDepositOption === 'deposit' && depositOptions.length > 0;
@@ -862,33 +768,17 @@ const ItemDetails = () => {
                 cart[existingIndex].quantity = (cart[existingIndex].quantity || 1) + qty;
                 cart[existingIndex].isDeposit = isDeposit;
                 cart[existingIndex].paymentAmount = paymentAmount;
-                // For variable products, store variation info
-                if (product?.isVariable) {
-                    cart[existingIndex].variationId = selectedVariationId;
-                    cart[existingIndex].variationOption = selectedOption;
-                }
             } else {
-                const cartItem: any = {
-                    id: productIdToAdd,
+                cart.push({
+                    id: addProductId,
                     quantity: qty,
                     isDeposit: isDeposit,
                     paymentAmount: paymentAmount
-                };
-
-                // For variable products, store variation info
-                if (product?.isVariable) {
-                    cartItem.variationId = selectedVariationId;
-                    cartItem.variationOption = selectedOption;
-                    cartItem.parentId = product.id; // Store parent product ID
-                }
-
-                cart.push(cartItem);
+                });
             }
-
             await updateCustomerById(userId, {
                 meta_data: [{ key: 'cart', value: cart }],
             });
-
             const cartIds = cart.map((item: any) => String(item.id));
             setCartItems(cartIds);
             setFeedbackMessage('Item added to cart');
@@ -921,6 +811,7 @@ const ItemDetails = () => {
         } catch (e) { }
         return null;
     };
+
 
     const renderRelatedProduct = ({ item }: { item: RelatedProduct }) => {
         const isInCart = cartItems.includes(item.id);
@@ -1012,6 +903,7 @@ const ItemDetails = () => {
         );
     };
 
+
     const renderReview = (item: Review) => (
         <View key={item.id} style={styles.reviewItem}>
             <View style={styles.reviewHeader}>
@@ -1059,7 +951,7 @@ const ItemDetails = () => {
 
     const isHeroVideo = isVideoLink(heroUri);
     const heroVideoThumbnail = isHeroVideo ? getYouTubeThumbnail(heroUri) : '';
-    const isProductInCart = cartItems.includes(product.id) || (selectedVariationId && cartItems.includes(selectedVariationId));
+    const isProductInCart = cartItems.includes(product.id);
     const currentPrice = getCurrentPrice();
     const currentOriginalPrice = getCurrentOriginalPrice();
     const currentDiscount = getCurrentDiscount();
@@ -1070,7 +962,7 @@ const ItemDetails = () => {
     const embedUrl = videoId
         ? `https://www.youtube.com/embed/${videoId}`
         : heroUri;
-    const currentInStock = getCurrentInStock();
+
 
     return (
         <SafeAreaView style={styles.container}>
@@ -1080,10 +972,12 @@ const ItemDetails = () => {
             />
             <ScrollView showsVerticalScrollIndicator={false}>
                 {/* Product Images */}
+                {/* Product Images */}
                 <View style={styles.imageSection}>
                     <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
                         <Ionicons name="arrow-back" size={24} color={Colors.WHITE} />
                     </TouchableOpacity>
+
 
                     {/* ✅ Hero Image / Video Section */}
                     <View style={styles.videoHeroContainer}>
@@ -1128,6 +1022,7 @@ const ItemDetails = () => {
                         )}
                     </View>
 
+
                     {/* ✅ Thumbnails */}
                     {product.images.length > 1 ? (
                         <FlatList
@@ -1140,6 +1035,7 @@ const ItemDetails = () => {
                         />
                     ) : null}
                 </View>
+
 
                 {/* Product Info */}
                 <View style={styles.infoSection}>
@@ -1172,15 +1068,6 @@ const ItemDetails = () => {
                             {product.rating} ({product.reviewCount} reviews)
                         </Text>
                     </View>
-
-                    {/* Stock Status */}
-                    {!currentInStock && (
-                        <View style={styles.stockBadge}>
-                            <Ionicons name="alert-circle-outline" size={16} color="#dc3545" />
-                            <Text style={styles.stockText}>Out of Stock</Text>
-                        </View>
-                    )}
-
                     <View style={styles.categoryContainer}>
                         <Ionicons name="pricetag-outline" size={16} color="#666" />
                         <Text style={styles.categoryText}>{product.categoryName || 'Uncategorized'}</Text>
@@ -1189,6 +1076,7 @@ const ItemDetails = () => {
                     <TouchableOpacity style={styles.button} onPress={handleGoToChat}>
                         <Text style={styles.buttonText}>Lets Talk</Text>
                     </TouchableOpacity>
+
 
                     <View style={styles.footer}>
                         <TouchableOpacity style={styles.wishlistButton} onPress={toggleWishlist}>
@@ -1199,34 +1087,22 @@ const ItemDetails = () => {
                             />
                         </TouchableOpacity>
                         <TouchableOpacity
-                            style={[
-                                styles.addToCartButtonFooter,
-                                !currentInStock && styles.disabledButton
-                            ]}
-                            onPress={() => {
-                                if (!currentInStock) return;
-                                isProductInCart ? router.push('/(tabs)/CartScreen') : handleAddToCart(product.id, quantity);
-                            }}
-                            disabled={(addToCartLoading && !isProductInCart) || !currentInStock}
+                            style={styles.addToCartButtonFooter}
+                            onPress={() => isProductInCart ? router.push('/(tabs)/CartScreen') : handleAddToCart(product.id, quantity)}
+                            disabled={addToCartLoading && !isProductInCart}
                         >
                             {addToCartLoading && !isProductInCart ? (
                                 <ActivityIndicator size="small" color={Colors.WHITE} />
                             ) : isProductInCart ? (
                                 <Text style={styles.addToCartTextFooter}>Go to Cart</Text>
-                            ) : !currentInStock ? (
-                                <Text style={styles.addToCartTextFooter}>Out of Stock</Text>
                             ) : (
                                 <Text style={styles.addToCartTextFooter}>Add to Cart</Text>
                             )}
                         </TouchableOpacity>
                         <View style={{ flex: 1, alignItems: 'center' }}>
                             <TouchableOpacity
-                                style={[
-                                    styles.checkoutButton,
-                                    !currentInStock && styles.disabledButton
-                                ]}
+                                style={styles.checkoutButton}
                                 onPress={async () => {
-                                    if (!currentInStock) return;
                                     if (!userId) {
                                         router.push('/Login/LoginRegisterPage');
                                         return;
@@ -1235,59 +1111,42 @@ const ItemDetails = () => {
                                         pathname: '/pages/Checkout/Checkout',
                                         params: {
                                             buyNow: 'true',
-                                            productId: selectedVariationId || product.id,
+                                            productId: product.id,
                                             quantity: quantity.toString(),
                                             option: selectedOption,
                                             isDeposit: (selectedDepositOption === 'deposit').toString(),
                                             paymentAmount: selectedAmount.toString(),
-                                            isVariable: product.isVariable ? 'true' : 'false',
-                                            variationId: selectedVariationId || ''
                                         }
                                     });
                                 }}
-                                disabled={!currentInStock}
                             >
-                                <Text style={styles.checkoutText}>
-                                    {!currentInStock ? 'Out of Stock' : 'Buy Now'}
-                                </Text>
+                                <Text style={styles.checkoutText}>Buy Now</Text>
                             </TouchableOpacity>
                         </View>
                     </View>
 
-                    {/* Variant Selection */}
-                    {product.isVariable && product.options.length > 0 && (
-                        <View style={styles.colorSection}>
-                            <Text style={styles.sectionTitle}>
-                                {product.attributeName}: {selectedOption}
-                                {product.variationMap && product.variationMap[selectedOption]?.sku && (
-                                    <Text style={styles.skuText}> (SKU: {product.variationMap[selectedOption]?.sku})</Text>
-                                )}
-                            </Text>
-                            <View style={styles.pickerWrapper}>
-                                <Picker
-                                    selectedValue={selectedOption}
-                                    onValueChange={handleOptionChange}
-                                    dropdownIconColor="#000"
-                                    style={styles.picker}
-                                >
-                                    {product.options.map((option) => {
-                                        const variation = product.variationMap?.[option];
-                                        const isOutOfStock = variation && !variation.inStock;
-                                        return (
-                                            <Picker.Item
-                                                key={option}
-                                                label={isOutOfStock ? `${option} (Out of Stock)` : option}
-                                                value={option}
-                                                color={isOutOfStock ? '#999' : '#000'}
-                                                enabled={!isOutOfStock}
-                                                style={{ backgroundColor: 'white' }}
-                                            />
-                                        );
-                                    })}
-                                </Picker>
-                            </View>
+                    <View style={styles.colorSection}>
+                        <Text style={styles.sectionTitle}>{product.attributeName}: {selectedOption}</Text>
+                        <View style={styles.pickerWrapper}>
+                            <Picker
+                                selectedValue={selectedOption}
+                                onValueChange={handleOptionChange}
+                                dropdownIconColor="#000"
+                                style={styles.picker}
+                            >
+                                {product.options.map((option) => (
+                                    <Picker.Item
+                                        key={option}
+                                        label={option}
+                                        value={option}
+                                        color="#000"
+                                        style={{ backgroundColor: 'white' }}
+                                    />
+                                ))}
+                            </Picker>
                         </View>
-                    )}
+
+                    </View>
 
                     <View style={styles.quantitySection}>
                         <Text style={styles.sectionTitle}>Quantity</Text>
@@ -1295,52 +1154,18 @@ const ItemDetails = () => {
                             <TouchableOpacity
                                 style={styles.quantityButton}
                                 onPress={() => setQuantity(Math.max(1, quantity - 1))}
-                                disabled={!currentInStock}
                             >
-                                <Ionicons name="remove" size={20} color={currentInStock ? "#333" : "#ccc"} />
+                                <Ionicons name="remove" size={20} color="#333" />
                             </TouchableOpacity>
-                            <Text style={[styles.quantityText, !currentInStock && styles.disabledText]}>{quantity}</Text>
+                            <Text style={styles.quantityText}>{quantity}</Text>
                             <TouchableOpacity
                                 style={styles.quantityButton}
                                 onPress={() => setQuantity(quantity + 1)}
-                                disabled={!currentInStock}
                             >
-                                <Ionicons name="add" size={20} color={currentInStock ? "#333" : "#ccc"} />
+                                <Ionicons name="add" size={20} color="#333" />
                             </TouchableOpacity>
                         </View>
                     </View>
-
-                    {/* Deposit Options */}
-                    {depositOptions.length > 0 && (
-                        <View style={styles.depositSection}>
-                            <Text style={styles.sectionTitle}>Payment Options</Text>
-                            {depositOptions.map((option) => (
-                                <TouchableOpacity
-                                    key={option.type}
-                                    style={[
-                                        styles.depositOption,
-                                        selectedDepositOption === option.type && styles.selectedDepositOption
-                                    ]}
-                                    onPress={() => handleDepositOptionChange(option.type)}
-                                >
-                                    <View style={styles.depositOptionHeader}>
-                                        <Ionicons
-                                            name={selectedDepositOption === option.type ? "radio-button-on" : "radio-button-off"}
-                                            size={20}
-                                            color={Colors.PRIMARY}
-                                        />
-                                        <Text style={styles.depositOptionLabel}>{option.label}</Text>
-                                        <Text style={styles.depositOptionAmount}>₹{option.amount.toFixed(2)}</Text>
-                                    </View>
-                                    {option.type === 'deposit' && option.remainingAmount && (
-                                        <Text style={styles.depositRemaining}>
-                                            Remaining: ₹{option.remainingAmount.toFixed(2)} to be paid later
-                                        </Text>
-                                    )}
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-                    )}
 
                     <View style={styles.deliverySection}>
                         <Text style={styles.sectionTitle}>Delivery</Text>
@@ -1401,3 +1226,5 @@ const ItemDetails = () => {
 };
 
 export default ItemDetails;
+
+
