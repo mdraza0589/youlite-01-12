@@ -140,69 +140,75 @@ const ChatListScreen = () => {
   return (
     <View style={styles.container}>
       <StatusBar barStyle={'light-content'} backgroundColor={'transparent'} />
-      <View style={styles.productListContainer}>
-        <View style={styles.header}>
-          <Text style={styles.headerText}>
-            {userId ? 'Product Messages' : 'Please Login to View Messages'}
-          </Text>
-          {lastRefreshed && (
-            <Text style={styles.lastRefreshedText}>{formatLastRefreshed()}</Text>
-          )}
-        </View>
 
-        {userId && (
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search products..."
-            placeholderTextColor="gray"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-        )}
+      <FlatList
+        data={userId ? filteredProducts : []}
+        keyExtractor={(item) => item.id.toString()}
+        renderItem={userId ? renderProductItem : undefined}
+        ListHeaderComponent={
+          <>
+            <View style={styles.header}>
+              <Text style={styles.headerText}>
+                {userId ? 'Product Messages' : 'Please Login to View Messages'}
+              </Text>
+              {lastRefreshed && (
+                <Text style={styles.lastRefreshedText}>{formatLastRefreshed()}</Text>
+              )}
+            </View>
 
-        {loadingProducts ? (
-          <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-            <Loading />
-            <Text style={{ marginTop: 12, fontSize: 18, fontWeight: '600', color: Colors.SECONDARY }}>
-              Loading your Chats
-            </Text>
-          </View>
-        ) : !userId ? (
-          <View style={styles.loginPrompt}>
-            <Text style={styles.loginText}>You need to be logged in to view your messages.</Text>
-          </View>
-        ) : filteredProducts.length === 0 ? (
-          <View style={styles.stateWrap}>
-            <Ionicons name="chatbubbles-outline" size={64} color="#6B7280" />
-            <Text style={styles.noResults}>No Messages found</Text>
-            <Text style={styles.noResultsSub}>Start a conversation from product pages</Text>
-            <TouchableOpacity style={styles.refreshButton} onPress={onRefresh}>
-              <Ionicons name="refresh" size={20} color={Colors.PRIMARY} />
-              <Text style={styles.refreshButtonText}>Refresh</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <FlatList
-            data={filteredProducts}
-            keyExtractor={(item) => item.id.toString()}
-            renderItem={renderProductItem}
-            contentContainerStyle={styles.productList}
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={onRefresh}
-                colors={[Colors.PRIMARY]}
-                tintColor={Colors.PRIMARY}
-                title="Refreshing conversations..."
-                titleColor={Colors.PRIMARY}
+            {userId && (
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search products..."
+                placeholderTextColor="gray"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
               />
-            }
-            showsVerticalScrollIndicator={false}
+            )}
+
+            {loadingProducts && (
+              <View style={{ alignItems: 'center', marginVertical: 20 }}>
+                <Loading />
+                <Text style={{ marginTop: 12, fontSize: 18, fontWeight: '600' }}>
+                  Loading your Chats
+                </Text>
+              </View>
+            )}
+          </>
+        }
+        ListEmptyComponent={
+          !loadingProducts && userId ? (
+            <View style={styles.stateWrap}>
+              <Ionicons name="chatbubbles-outline" size={64} color="#6B7280" />
+              <Text style={styles.noResults}>No Messages found</Text>
+              <Text style={styles.noResultsSub}>
+                Start a conversation from product pages
+              </Text>
+              <TouchableOpacity style={styles.refreshButton} onPress={onRefresh}>
+                <Ionicons name="refresh" size={20} color={Colors.PRIMARY} />
+                <Text style={styles.refreshButtonText}>Refresh</Text>
+              </TouchableOpacity>
+            </View>
+          ) : !userId ? (
+            <View style={styles.loginPrompt}>
+              <Text style={styles.loginText}>Please login to view messages.</Text>
+            </View>
+          ) : null
+        }
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[Colors.PRIMARY]}
+            tintColor={Colors.PRIMARY}
           />
-        )}
-      </View>
+        }
+        contentContainerStyle={{ paddingBottom: 20 }}
+        showsVerticalScrollIndicator={false}
+      />
     </View>
   );
+
 };
 
 const styles = StyleSheet.create({

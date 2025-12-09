@@ -832,7 +832,7 @@ const SearchResults: React.FC = () => {
   };
 
   return (
-    <View>
+    <View style={{ flex: 1 }}>
       <StatusBar barStyle={'dark-content'} backgroundColor={'transparent'} />
       <SafeAreaView style={styles.safeArea}>
         {/* Header */}
