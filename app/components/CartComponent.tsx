@@ -12,8 +12,6 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-
 import {
   getCustomerById,
   getSession,
@@ -49,20 +47,11 @@ const CartComponent = () => {
   /* -------------------- Load Cart -------------------- */
   const loadCart = useCallback(async () => {
     try {
+      setLoading(true);
       setErrorText("");
 
-      // 🚀 Show instant cache if available
-      const cachedCart = await AsyncStorage.getItem("cartCache");
-
-      if (cachedCart) {
-        setCartItems(JSON.parse(cachedCart));
-        setLoading(false); // 👈 stop loader if cache exists
-      }
-
-
-      setLoading(true);
-
       const session = await getSession();
+
       if (!session?.user?.id) {
         setErrorText("Please log in to view your cart.");
         setCartItems([]);
@@ -73,8 +62,15 @@ const CartComponent = () => {
       setUserId(session.user.id);
       const customer = await getCustomerById(session.user.id);
 
+      if (!customer) {
+        setErrorText("Failed to load customer data.");
+        setCartItems([]);
+        setLoading(false);
+        return;
+      }
+
       const cartMeta =
-        customer?.meta_data?.find((m: any) => m.key === "cart")?.value || [];
+        customer.meta_data?.find((m: any) => m.key === "cart")?.value || [];
 
       if (!Array.isArray(cartMeta) || cartMeta.length === 0) {
         setCartItems([]);
@@ -82,75 +78,72 @@ const CartComponent = () => {
         return;
       }
 
-      // 🚀 Fetch all products in parallel
-      const fetchedProducts = await Promise.all(
-        cartMeta.map(async (entry: any) => {
-          try {
-            const productResponse = await getProductDetail(entry.id.toString());
-            const productData = productResponse?.data || productResponse;
+      const fetched: CartItem[] = [];
 
-            if (!productData) return null;
+      for (const entry of cartMeta) {
+        const { id, quantity } = entry;
+        if (!id) continue;
 
-            const attrs = Array.isArray(productData.attributes)
-              ? productData.attributes
-              : [];
+        try {
+          const productResponse = await getProductDetail(id.toString());
+          const productData = productResponse?.data || productResponse;
+          if (!productData) continue;
 
-            const color =
-              attrs.find((a: any) => a.name?.toLowerCase().includes("color"))
-                ?.options?.[0] || "Default";
-            const size =
-              attrs.find((a: any) => a.name?.toLowerCase().includes("size"))
-                ?.options?.[0] || "Default";
+          const attrs = Array.isArray(productData.attributes)
+            ? productData.attributes
+            : [];
+          const color =
+            attrs.find((a: any) => a?.name?.toLowerCase().includes("color"))
+              ?.options?.[0] || "Default";
+          const size =
+            attrs.find((a: any) => a?.name?.toLowerCase().includes("size"))
+              ?.options?.[0] || "Default";
 
-            const price = parseFloat(
-              productData.sale_price ||
+          const price = parseFloat(
+            productData.sale_price ||
               productData.price ||
               productData.regular_price ||
               "0"
-            );
+          );
 
-            const originalPrice = parseFloat(
-              productData.regular_price || productData.price || price
-            );
+          const originalPrice = parseFloat(
+            productData.regular_price || productData.price || price.toString()
+          );
 
-            return {
-              id: entry.id.toString(),
-              name: productData.name,
-              price,
-              originalPrice,
-              size,
-              color,
-              image: { uri: productData.images?.[0]?.src },
-              quantity: entry.quantity,
-            };
-          } catch {
-            return null;
-          }
-        })
-      );
+          const imageUri =
+            productData.images?.[0]?.src ||
+            productData.image?.src ||
+            "https://via.placeholder.com/100";
 
-      const finalData = fetchedProducts.filter(
-        (item): item is CartItem => item !== null
-      );
+          fetched.push({
+            id: productData.id?.toString() || id.toString(),
+            name: productData.name || "Unnamed Product",
+            price: isNaN(price) ? 0 : price,
+            originalPrice: isNaN(originalPrice) ? price : originalPrice,
+            size,
+            color,
+            image: { uri: imageUri },
+            quantity: quantity || 1,
+          });
+        } catch (err) {
+          continue;
+        }
+      }
 
-      setCartItems(finalData);
-
-      // 🧠 Cache the fresh results
-      await AsyncStorage.setItem("cartCache", JSON.stringify(finalData));
+      setCartItems(fetched);
     } catch (err) {
-      setErrorText("Failed to load your cart.");
+      setErrorText("Failed to load cart. Please try again.");
+      setCartItems([]);
     } finally {
       setLoading(false);
     }
   }, []);
-
 
   useFocusEffect(
     useCallback(() => {
       loadCart();
     }, [loadCart])
   );
-
 
   /* -------------------- Meta Update -------------------- */
   const updateCartMeta = async (items: CartItem[]) => {
@@ -367,7 +360,7 @@ const CartComponent = () => {
                       {Math.round(
                         ((item.originalPrice - item.price) /
                           item.originalPrice) *
-                        100
+                          100
                       )}
                       % OFF
                     </Text>
